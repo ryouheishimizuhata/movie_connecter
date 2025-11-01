@@ -14,7 +14,7 @@ def get_ffmpeg_exe() -> str:
 
 import imageio_ffmpeg
 
-st.set_page_config(page_title="動画結合＋二段字幕（Streamlit）", layout="wide")
+st.set_page_config(page_title="shorts動画作成", layout="wide")
 
 st.title("shorts動画作成")
 
@@ -69,7 +69,6 @@ crf = st.sidebar.number_input("CRF（画質：16-23推奨）", value=18, step=1,
 preset = st.sidebar.selectbox("preset", ["ultrafast","superfast","veryfast","faster","fast","medium","slow","slower","veryslow"], index=5)
 output_name = st.sidebar.text_input("出力ファイル名", value="output_joined.mp4")
 font_file = st.sidebar.file_uploader("（任意）TrueType/OpenTypeフォントを指定", type=["ttf","otf"], accept_multiple_files=False, help="日本語字幕でフォントを指定したい場合に使用")
-font_name = st.sidebar.text_input("（任意）フォント名（例: Noto Sans CJK JP / ラノベPOP）", value="ラノベPOP")
 
 st.sidebar.header("縦動画キャンバス設定")
 use_vertical_canvas = st.sidebar.checkbox("縦1080×1920のキャンバスに固定する", value=True)
