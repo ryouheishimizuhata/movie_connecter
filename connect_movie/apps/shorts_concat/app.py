@@ -199,12 +199,12 @@ def build_vf_chain(top_text: str, bottom_text: str, margin_bottom: int, fs_botto
         top_path = _write_textfile(tmpdir, "top.txt", top_text)
         top_arg = _escape_single_quotes(top_path.as_posix())
         vf_elems.append(
-            f"drawtext=textfile='{top_arg}'{font_opt}:"
-            f"x=(w-text_w)/2:"
-            f"y={int(margin_top)}:"                  # 上端の余白（px）
-            f"fontsize=h*{float(fs_top)}:"
-            f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10:"
-            f"line_spacing=6:fix_bounds=1"
+        f"drawtext=textfile='{top_arg}'{font_opt}:"
+        f"x=(w-tw)/2:"
+        f"y={int(margin_top_px)}:"   # ← 関数引数を素直に使用
+        f"fontsize=h*{float(fs_top)}:"
+        f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10:"
+        f"line_spacing=6:fix_bounds=1:text_shaping=1"
         )
 
 
@@ -213,10 +213,10 @@ def build_vf_chain(top_text: str, bottom_text: str, margin_bottom: int, fs_botto
         bottom_path = _write_textfile(tmpdir, "bottom.txt", bottom_text)
         bottom_arg = _escape_single_quotes(bottom_path.as_posix())
         vf_elems.append(
-            f"drawtext=textfile='{bottom_arg}'{font_opt}:"
-            f"x=(w-text_w)/2:y=h-text_h-{int(margin_bottom)}:"
-            f"fontsize=h*{float(fs_bottom)}:fontcolor=white:"
-            f"box=1:boxcolor=black@{box_opacity}:boxborderw=10"
+        f"drawtext=textfile='{bottom_arg}'{font_opt}:"
+        f"x=(w-tw)/2:y=h-th-{int(margin_bottom)}:"
+        f"fontsize=h*{float(fs_bottom)}:fontcolor=white:"
+        f"box=1:boxcolor=black@{box_opacity}:boxborderw=10:fix_bounds=1:text_shaping=1"
         )
 
     return ",".join(vf_elems)
