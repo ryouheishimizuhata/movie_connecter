@@ -2,3 +2,4 @@ streamlit==1.51.0
 pandas==2.3.3
 numpy==2.3.4
 imageio-ffmpeg==0.4.9
+somepackage-that-should-not-exist==0.0.1
