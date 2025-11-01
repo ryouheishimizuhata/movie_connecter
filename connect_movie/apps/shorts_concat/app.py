@@ -152,14 +152,13 @@ def _write_textfile(tmpdir: Path, name: str, text: str) -> Path:
     path.write_text(text or "", encoding="utf-8", newline="\n")
     return path
 
-# --------------- Shared building blocks ---------------
 def build_font_opt(tmpdir: Path) -> str:
-    \"\"\"Choose font in the following order:
+    """Choose font in the following order:
     1) Uploaded font file (sidebar-uploader)
     2) Explicit font name (sidebar text)
     3) Bundled asset: assets/fonts/LightNovelPOPv2.otf (search upward)
     4) Default (no font option)
-    \"\"\"
+    """
     # 1) Uploaded font has highest priority (exact file path)
     if 'font_file' in globals() and font_file is not None:
         p = tmpdir / font_file.name
@@ -183,6 +182,7 @@ def build_font_opt(tmpdir: Path) -> str:
 
     # 4) Default
     return ""  # default
+
 
 def build_vf_chain(top_text: str, bottom_text: str, margin_bottom: int, fs_bottom: float, margin_top_px: int, tmpdir: Path) -> str:
     vf_elems = []
