@@ -194,18 +194,28 @@ def build_vf_chain(top_text: str, bottom_text: str, margin_bottom: int, fs_botto
     # 5) 以降に drawtext（字幕）
     font_opt = build_font_opt(tmpdir)
 
-    # 上部字幕：textfile= を使う（日本語・複数行に強い）
+    # 上部字幕：行ごとに drawtext（各行を個別に中央寄せ）
     if top_text:
-        top_path = _write_textfile(tmpdir, "top.txt", top_text)
-        top_arg = _escape_single_quotes(top_path.as_posix())
-        vf_elems.append(
-        f"drawtext=textfile='{top_arg}'{font_opt}:"
-        f"x=(w-tw)/2:"
-        f"y={int(margin_top_px)}:"   # ← 関数引数を素直に使用
-        f"fontsize=h*{float(fs_top)}:"
-        f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10:"
-        f"line_spacing=6:fix_bounds=1:text_shaping=1"
-        )
+        lines = top_text.splitlines()
+        line_spacing_ratio = 1.2  # 行間（フォントサイズ比）
+
+        for i, line in enumerate(lines):
+            # 行テキストを1行だけの textfile として保存（UTF-8 / LF）
+            top_i_path = _write_textfile(tmpdir, f"top_line_{i}.txt", line)
+            top_i_arg = _escape_single_quotes(top_i_path.as_posix())
+
+            # 各行について、tw/th は「その行」の幅・高さになる
+            # → x を (w - tw)/2 にすれば行ごとに厳密にセンタリングできる
+            y_expr = f"{int(margin_top_px)} + {i}*(h*{float(fs_top)}*{line_spacing_ratio})"
+
+            vf_elems.append(
+                f"drawtext=textfile='{top_i_arg}'{font_opt}:"
+                f"x=(w-tw)/2:"
+                f"y={y_expr}:"
+                f"fontsize=h*{float(fs_top)}:"
+                f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10:"
+                f"fix_bounds=1:text_shaping=1"
+            )
 
 
     # ▼ 下部字幕：textfile= を使う（複数行OK）
