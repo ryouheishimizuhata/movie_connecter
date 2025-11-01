@@ -1,4 +1,3 @@
-
 # app_streamlit.py
 # -*- coding: utf-8 -*-
 import streamlit as st
@@ -153,35 +152,32 @@ def _write_textfile(tmpdir: Path, name: str, text: str) -> Path:
     return path
 
 def build_font_opt(tmpdir: Path) -> str:
-    """Choose font in the following order:
-    1) Uploaded font file (sidebar-uploader)
-    2) Explicit font name (sidebar text)
-    3) Bundled asset: assets/fonts/LightNovelPOPv2.otf (search upward)
-    4) Default (no font option)
+    """優先順位:
+    1) サイドバーでアップロードされたフォント
+    2) リポジトリ同梱 assets/fonts/LightNovelPOPv2.otf
+    3) それ以外（無指定）
     """
-    # 1) Uploaded font has highest priority (exact file path)
+    # 1) アップロードフォント
     if 'font_file' in globals() and font_file is not None:
         p = tmpdir / font_file.name
         with open(p, "wb") as f:
             f.write(font_file.getvalue())
         return f":fontfile='{p.as_posix()}'"
 
-    # 2) Named font (system-available name)
-    if 'font_name' in globals() and isinstance(font_name, str) and font_name.strip():
-        return f":font='{font_name.strip()}'"
-
-    # 3) Bundled asset: search assets/fonts/LightNovelPOPv2.otf upward from current file
+    # 2) 同梱フォント（絶対パスで探索）
     try:
         here = Path(__file__).resolve()
         for up in [here, *list(here.parents)]:
-            cand = up.parent / "assets" / "fonts" / "LightNovelPOPv2.otf"
+            # up がファイルなら .parent、ディレクトリならそのまま扱う
+            base = up.parent if up.is_file() else up
+            cand = base / "assets" / "fonts" / "LightNovelPOPv2.otf"
             if cand.exists():
                 return f":fontfile='{cand.as_posix()}'"
     except Exception:
         pass
 
-    # 4) Default
-    return ""  # default
+    # 3) 無指定（最後の手段）
+    return ""
 
 
 def build_vf_chain(top_text: str, bottom_text: str, margin_bottom: int, fs_bottom: float, margin_top_px: int, tmpdir: Path) -> str:
@@ -200,23 +196,18 @@ def build_vf_chain(top_text: str, bottom_text: str, margin_bottom: int, fs_botto
     # 5) 以降に drawtext（字幕）
     font_opt = build_font_opt(tmpdir)
 
-    # 上部字幕（各行を個別に中央揃え）
+    # 上部字幕：textfile= を使う（日本語・複数行に強い）
     if top_text:
-        lines = top_text.splitlines()  # ここで複数行に分割
-        line_spacing = 1.2             # 行間（フォントサイズ比）。必要に応じて調整
-        for i, line in enumerate(lines):
-            te_line = ff_esc(line)
-            # y = 上余白 + 行番号 * (フォントサイズ×行間)
-            y_expr = int(margin_top) + i * int(fs_top * 1000)  # ダミー式（下でhベースに直す例を使用）
-
-            vf_elems.append(
-                f"drawtext=text='{te_line}'{font_opt}:"
-                f"x=(w-text_w)/2:"
-                # h*fs_top*行間×i を使って行送り。整数化不要ならそのまま式でOK。
-                f"y={int(margin_top)}+{i}*(h*{fs_top}*{line_spacing}):"
-                f"fontsize=h*{fs_top}:"
-                f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10"
-            )
+        top_path = _write_textfile(tmpdir, "top.txt", top_text)
+        top_arg = _escape_single_quotes(top_path.as_posix())
+        vf_elems.append(
+            f"drawtext=textfile='{top_arg}'{font_opt}:"
+            f"x=(w-text_w)/2:"
+            f"y={int(margin_top)}:"                  # 上端の余白（px）
+            f"fontsize=h*{float(fs_top)}:"
+            f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10:"
+            f"line_spacing=6:fix_bounds=1"
+        )
 
 
     # ▼ 下部字幕：textfile= を使う（複数行OK）
