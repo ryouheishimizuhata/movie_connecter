@@ -169,7 +169,7 @@ def build_font_opt(tmpdir: Path) -> str:
         for up in [here, *list(here.parents)]:
             # up がファイルなら .parent、ディレクトリならそのまま扱う
             base = up.parent if up.is_file() else up
-            cand = base / "assets" / "fonts" / "LightNovelPOPv2.otf"
+            cand = base / "assets" / "fonts" / "LanobePOPv2" / "LightNovelPOPv2.otf"
             if cand.exists():
                 return f":fontfile='{cand.as_posix()}'"
     except Exception:
