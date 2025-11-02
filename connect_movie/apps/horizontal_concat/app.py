@@ -1,5 +1,3 @@
-
-# app_streamlit.py
 # -*- coding: utf-8 -*-
 import streamlit as st
 import os, io, tempfile, shutil, subprocess
@@ -16,22 +14,22 @@ def get_ffmpeg_exe() -> str:
 
 import imageio_ffmpeg
 
-st.set_page_config(page_title="横動画連結アプリ", layout="wide")
+st.set_page_config(page_title="動画結合＋二段字幕（Streamlit）", layout="wide")
 
-st.title("横動画連結アプリ")
+st.title("動画結合＋二段字幕（上：共通 / 下：クリップ別）")
 
 st.markdown("""
 **手順**
-1. 左のサイドバーで上部字幕や書き出し設定を入力  
+1. 左のサイドバーで共通（上部）字幕や書き出し設定を入力  
 2. 下で動画をまとめて選択（複数可）し、順序と各クリップ下部字幕を入力  
-3. 「結合して書き出す」を押す  
+3. 必要なら「🔎 プレビューを生成」で確認  
+4. 問題なければ「🎬 結合して書き出す」
 """)
 
 # --------------- Utils ---------------
 def has_ffmpeg() -> bool:
     try:
         ff = get_ffmpeg_exe()
-        import subprocess
         subprocess.run([ff, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         return True
     except Exception:
@@ -46,6 +44,18 @@ def ff_esc(text: str) -> str:
     t = t.replace("\n", r"\n")
     return t
 
+def run_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        logs = []
+        for line in proc.stdout:
+            logs.append(line)
+        proc.wait()
+        ok = proc.returncode == 0
+        return ok, "".join(logs)
+    except Exception as e:
+        return False, f"Exception: {e}"
+
 # --------------- Sidebar Settings ---------------
 st.sidebar.header("共通設定（上部字幕 & 書き出し）")
 global_top_text = st.sidebar.text_area("上部字幕（全クリップ共通）", value="", height=80, help="空欄で上部字幕なし")
@@ -54,12 +64,21 @@ fs_bottom_default = st.sidebar.number_input("下部字幕フォントサイズ�
 margin_top = st.sidebar.number_input("上部の余白(px)", value=40, step=2, min_value=0)
 margin_bottom_default = st.sidebar.number_input("下部の余白（既定・px）", value=40, step=2, min_value=0)
 box_opacity = st.sidebar.slider("字幕背景の不透明度", 0.0, 1.0, 0.55, 0.05)
+
+st.sidebar.divider()
+st.sidebar.subheader("本番エンコード")
 crf = st.sidebar.number_input("CRF（画質：16-23推奨）", value=18, step=1, min_value=12, max_value=30)
 preset = st.sidebar.selectbox("preset", ["ultrafast","superfast","veryfast","faster","fast","medium","slow","slower","veryslow"], index=5)
 output_name = st.sidebar.text_input("出力ファイル名", value="output_joined.mp4")
 font_file = st.sidebar.file_uploader("（任意）TrueType/OpenTypeフォントを指定", type=["ttf","otf"], accept_multiple_files=False, help="日本語字幕でフォントを指定したい場合に使用")
 
 st.sidebar.info("⚠️ このアプリはローカル/サーバでの実行を想定しています。stlite（ブラウザのみ）環境では FFmpeg が動作しません。")
+
+st.sidebar.divider()
+st.sidebar.subheader("プレビュー設定（高速）")
+preview_seconds = st.sidebar.number_input("プレビュー秒数（各クリップの冒頭）", value=5, min_value=2, max_value=30, step=1)
+preview_downscale = st.sidebar.checkbox("解像度を縮小して高速化（例：縦480px）", value=True)
+preview_fast_encode = st.sidebar.checkbox("高速エンコード（CRF=28 / ultrafast）", value=True)
 
 # --------------- Inputs: videos ---------------
 st.subheader("動画と下部字幕の入力")
@@ -73,9 +92,7 @@ def rebuild_from_uploads():
     """Merge new uploads into session_state, preserving any already-entered metadata by matching filename+size."""
     existing = st.session_state["clips"]
     new_items = []
-    # Build a set to find duplicates by (name, size) fingerprint
     existing_keys = {(c["name"], len(c["data"])) for c in existing}
-    # Append new ones with default metadata
     if uploads:
         start_order = len(existing) + 1
         for f in uploads:
@@ -97,8 +114,7 @@ rebuild_from_uploads()
 
 clips = st.session_state["clips"]
 if clips:
-    st.caption("順序・各字幕を編集してから下のボタンで書き出してください。")
-    # Table-like editor
+    st.caption("順序・各字幕を編集してからプレビュー／書き出しを行ってください。")
     cols = st.columns([3,1,3,1,1])
     with cols[0]: st.markdown("**ファイル名**")
     with cols[1]: st.markdown("**順序**")
@@ -106,7 +122,6 @@ if clips:
     with cols[3]: st.markdown("**fs**")
     with cols[4]: st.markdown("**余白**")
 
-    # Render each row with widgets
     for i, c in enumerate(clips):
         cols = st.columns([3,1,3,1,1])
         with cols[0]:
@@ -122,20 +137,122 @@ if clips:
 else:
     st.info("動画を選択してください。")
 
-# --------------- Process button ---------------
-run = st.button("🎬 結合して書き出す", use_container_width=True)
+# --------------- Drawtext builders (short-like unified style) ---------------
+def build_drawtext_filters(top_text: str,
+                           fs_top_val: float,
+                           bottom_text: str,
+                           fs_bottom_val: float,
+                           margin_top_px: int,
+                           margin_bottom_px: int,
+                           box_alpha: float,
+                           font_path: Path | None) -> str:
+    """
+    “short” と同様の描画設定：
+      - 複数行は text_align=center
+      - 横方向中央: x=(w-text_w)/2
+      - 上部: ページ上端から margin_top_px
+      - 下部: 下端から margin_bottom_px
+    """
+    font_opt = f":fontfile='{font_path.as_posix()}'" if font_path else ""
+    vf_top = ""
+    if top_text:
+        top_esc = ff_esc(top_text)
+        vf_top = (
+            f"drawtext=text='{top_esc}'{font_opt}:"
+            f"text_align=center:"
+            f"x=(w-text_w)/2:y={int(margin_top_px)}:"
+            f"fontsize=h*{fs_top_val}:"
+            f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
+        )
+    vf_bottom = ""
+    if bottom_text:
+        bottom_esc = ff_esc(bottom_text)
+        vf_bottom = (
+            f"drawtext=text='{bottom_esc}'{font_opt}:"
+            f"text_align=center:"
+            f"x=(w-text_w)/2:y=h-text_h-{int(margin_bottom_px)}:"
+            f"fontsize=h*{fs_bottom_val}:"
+            f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
+        )
+    if vf_top and vf_bottom:
+        return f"{vf_top},{vf_bottom}"
+    elif vf_top:
+        return vf_top
+    elif vf_bottom:
+        return vf_bottom
+    else:
+        return "null"
 
-def run_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-        logs = []
-        for line in proc.stdout:
-            logs.append(line)
-        proc.wait()
-        ok = proc.returncode == 0
-        return ok, "".join(logs)
-    except Exception as e:
-        return False, f"Exception: {e}"
+# --------------- Preview button ---------------
+preview = st.button("🔎 プレビューを生成", use_container_width=True)
+
+if preview:
+    if not has_ffmpeg():
+        st.error("FFmpeg が見つかりません。ローカルにインストールし、PATH を通してください。")
+    elif not clips:
+        st.warning("動画が選択されていません。")
+    else:
+        clips_sorted = sorted(clips, key=lambda x: x["order"])
+        with st.spinner("プレビュー生成中..."):
+            with tempfile.TemporaryDirectory(prefix="st_preview_") as tmpd:
+                tmpdir = Path(tmpd)
+                # Save optional font
+                font_path = None
+                if font_file is not None:
+                    font_path = tmpdir / font_file.name
+                    with open(font_path, "wb") as f:
+                        f.write(font_file.getvalue())
+
+                for idx, c in enumerate(clips_sorted):
+                    in_path = tmpdir / f"in_prev_{idx:03d}{Path(c['name']).suffix}"
+                    with open(in_path, "wb") as f:
+                        f.write(c["data"])
+
+                    vf = build_drawtext_filters(
+                        top_text=global_top_text,
+                        fs_top_val=fs_top,
+                        bottom_text=(c["bottom"] or ""),
+                        fs_bottom_val=float(c["fs_bottom"]),
+                        margin_top_px=int(margin_top),
+                        margin_bottom_px=int(c["margin_bottom"]),
+                        box_alpha=box_opacity,
+                        font_path=font_path
+                    )
+
+                    # 低解像度へ縮小（縦を480に、幅はアスペクト維持で偶数に）
+                    scale_filter = ""
+                    if preview_downscale:
+                        scale_filter = ",scale=-2:480"
+
+                    vf_full = vf + scale_filter if vf != "null" else ("scale=-2:480" if preview_downscale else "null")
+
+                    # 高速エンコード設定
+                    pv_crf = 28 if preview_fast_encode else max(20, min(30, crf))
+                    pv_preset = "ultrafast" if preview_fast_encode else preset
+
+                    out_i = tmpdir / f"preview_{idx:03d}.mp4"
+                    cmd = [
+                        get_ffmpeg_exe(), "-y",
+                        "-ss", "0", "-t", str(int(preview_seconds)),
+                        "-i", str(in_path),
+                        "-vf", vf_full,
+                        "-c:v", "libx264",
+                        "-crf", str(pv_crf),
+                        "-preset", pv_preset,
+                        "-c:a", "aac",
+                        "-movflags", "+faststart",
+                        str(out_i)
+                    ]
+                    ok, log = run_ffmpeg(cmd)
+                    if not ok:
+                        st.error(f"プレビュー生成に失敗しました（{c['name']}）。ログ:\n\n{log}")
+                        st.stop()
+
+                    st.markdown(f"**プレビュー: {c['name']}（先頭 {preview_seconds} 秒）**")
+                    st.video(str(out_i))
+
+# --------------- Final export ---------------
+run = st.button("🎬 結合して書き出す", use_container_width=True)
 
 if run:
     if not has_ffmpeg():
@@ -143,7 +260,6 @@ if run:
     elif not clips:
         st.warning("動画が選択されていません。")
     else:
-        # Sort by order
         clips_sorted = sorted(clips, key=lambda x: x["order"])
         with st.spinner("書き出し中...（時間がかかる場合があります）"):
             with tempfile.TemporaryDirectory(prefix="st_join_subs_") as tmpd:
@@ -162,35 +278,16 @@ if run:
                     with open(in_path, "wb") as f:
                         f.write(c["data"])
 
-                    top_esc = ff_esc(global_top_text)
-                    bottom_esc = ff_esc(c["bottom"] or "")
-
-                    # drawtext filters
-                    font_opt = f":fontfile='{font_path.as_posix()}'" if font_path else ""
-                    vf_top = ""
-                    if global_top_text:
-                        vf_top = (
-                            f"drawtext=text='{top_esc}'{font_opt}:"
-                            f"x=(w-text_w)/2:y={int(c.get('margin_top', 0) or 0) + int(margin_top)}:"
-                            f"fontsize=h*{fs_top}:"
-                            f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10"
-                        )
-                    vf_bottom = ""
-                    if bottom_esc:
-                        vf_bottom = (
-                            f"drawtext=text='{bottom_esc}'{font_opt}:"
-                            f"x=(w-text_w)/2:y=h-text_h-{int(c['margin_bottom'])}:"
-                            f"fontsize=h*{float(c['fs_bottom'])}:"
-                            f"fontcolor=white:box=1:boxcolor=black@{box_opacity}:boxborderw=10"
-                        )
-                    if vf_top and vf_bottom:
-                        vf = f"{vf_top},{vf_bottom}"
-                    elif vf_top:
-                        vf = vf_top
-                    elif vf_bottom:
-                        vf = vf_bottom
-                    else:
-                        vf = "null"
+                    vf = build_drawtext_filters(
+                        top_text=global_top_text,
+                        fs_top_val=fs_top,
+                        bottom_text=(c["bottom"] or ""),
+                        fs_bottom_val=float(c["fs_bottom"]),
+                        margin_top_px=int(margin_top),
+                        margin_bottom_px=int(c["margin_bottom"]),
+                        box_alpha=box_opacity,
+                        font_path=font_path
+                    )
 
                     out_i = tmpdir / f"part_{idx:03d}.mp4"
                     cmd = [
@@ -210,17 +307,13 @@ if run:
                         st.stop()
                     parts.append(out_i)
 
-                # Concat
+                # Concat list
                 listfile = tmpdir / "concat.txt"
-                # 置き換え後（安全）
                 with open(listfile, "w", encoding="utf-8") as f:
                     for p in parts:
                         sp = str(p)
-                        # ffmpeg concat 用の単一引用符エスケープ
                         sp_escaped = sp.replace("'", "'\\''")
                         f.write(f"file '{sp_escaped}'\n")
-
-
 
                 out_path = tmpdir / (output_name or "output_joined.mp4")
                 cmd_concat = [
