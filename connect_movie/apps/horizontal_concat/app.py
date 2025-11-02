@@ -147,41 +147,51 @@ def build_drawtext_filters(top_text: str,
                            box_alpha: float,
                            font_path: Path | None) -> str:
     """
-    “short” と同様の描画設定：
-      - 複数行は text_align=center
-      - 横方向中央: x=(w-text_w)/2
-      - 上部: ページ上端から margin_top_px
-      - 下部: 下端から margin_bottom_px
+    FFmpeg 4.2 互換：text_align を使わず、複数行は行ごとに drawtext を積む。
+    - 各行の x は (w-text_w)/2 で横中央
+    - 行間は 1.25 * (h*fontsize) で概算
+    - 上部は上から順に描画、下部は下から積み上げる
     """
     font_opt = f":fontfile='{font_path.as_posix()}'" if font_path else ""
-    vf_top = ""
+    filters = []
+
+    # ---- 上部字幕 ----
     if top_text:
-        top_esc = ff_esc(top_text)
-        vf_top = (
-            f"drawtext=text='{top_esc}'{font_opt}:"
-            f"text_align=center:"
-            f"x=(w-text_w)/2:y={int(margin_top_px)}:"
-            f"fontsize=h*{fs_top_val}:"
-            f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
-        )
-    vf_bottom = ""
+        lines = top_text.split("\n")
+        for i, line in enumerate(lines):
+            esc = ff_esc(line)
+            # y = margin_top + i * (line_height)
+            # line_height ≒ 1.25 * (h * fs_top_val)
+            y_expr = f"{int(margin_top_px)}+{i}*(h*{fs_top_val}*1.25)"
+            filt = (
+                f"drawtext=text='{esc}'{font_opt}:"
+                f"x=(w-text_w)/2:y={y_expr}:"
+                f"fontsize=h*{fs_top_val}:"
+                f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
+            )
+            filters.append(filt)
+
+    # ---- 下部字幕 ----
     if bottom_text:
-        bottom_esc = ff_esc(bottom_text)
-        vf_bottom = (
-            f"drawtext=text='{bottom_esc}'{font_opt}:"
-            f"text_align=center:"
-            f"x=(w-text_w)/2:y=h-text_h-{int(margin_bottom_px)}:"
-            f"fontsize=h*{fs_bottom_val}:"
-            f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
-        )
-    if vf_top and vf_bottom:
-        return f"{vf_top},{vf_bottom}"
-    elif vf_top:
-        return vf_top
-    elif vf_bottom:
-        return vf_bottom
-    else:
-        return "null"
+        lines = bottom_text.split("\n")
+        N = len(lines)
+        for i, line in enumerate(lines):
+            esc = ff_esc(line)
+            # 下から詰める：
+            # 最下段の行（i=N-1）が y = h - (1)*(h*fs*1.25) - margin_bottom
+            # その1つ上（i=N-2）が y = h - (2)*(h*fs*1.25) - margin_bottom …という形
+            # ⇒ y = h - (N - i)*(h*fs*1.25) - margin_bottom
+            y_expr = f"h-( {N}-{i} )*(h*{fs_bottom_val}*1.25)-{int(margin_bottom_px)}"
+            filt = (
+                f"drawtext=text='{esc}'{font_opt}:"
+                f"x=(w-text_w)/2:y={y_expr}:"
+                f"fontsize=h*{fs_bottom_val}:"
+                f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
+            )
+            filters.append(filt)
+
+    return ",".join(filters) if filters else "null"
+
 
 # --------------- Preview button ---------------
 preview = st.button("🔎 プレビューを生成", use_container_width=True)
