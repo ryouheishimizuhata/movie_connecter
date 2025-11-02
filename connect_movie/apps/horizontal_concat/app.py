@@ -36,7 +36,7 @@ def has_ffmpeg() -> bool:
 def ff_esc_basic(text: str) -> str:
     # textfile= を使うため最低限（バックスラッシュのみ）
     if text is None: return ""
-    return text.replace("\\", r"\\")  # drawtext内部でのエスケープ
+    return text.replace("\\", r"\\")
 
 def run_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
     try:
@@ -64,7 +64,19 @@ st.sidebar.subheader("本番エンコード")
 crf = st.sidebar.number_input("CRF（画質：16-23推奨）", value=18, step=1, min_value=12, max_value=30)
 preset = st.sidebar.selectbox("preset", ["ultrafast","superfast","veryfast","faster","fast","medium","slow","slower","veryslow"], index=5)
 output_name = st.sidebar.text_input("出力ファイル名", value="output_joined.mp4")
-font_file = st.sidebar.file_uploader("（強く推奨）日本語フォントを指定（TTF/OTF）", type=["ttf","otf"], accept_multiple_files=False, help="NotoSansCJK / Source Han など")
+
+# 日本語フォント対策：アップロード or システムフォント名（fontconfig）
+font_file = st.sidebar.file_uploader(
+    "（推奨）日本語フォントを指定（TTF/OTF）",
+    type=["ttf", "otf"],
+    accept_multiple_files=False,
+    help="Noto Sans/Source Han など"
+)
+system_font_name = st.sidebar.text_input(
+    "（任意）システムのフォント名（fontconfig）",
+    value="",
+    help="例: 'Noto Sans CJK JP', 'Source Han Sans JP'（サーバにインストール必須）"
+)
 
 st.sidebar.info("⚠️ stlite（ブラウザのみ）では FFmpeg は動きません。ローカル/サーバ実行を想定。")
 
@@ -132,7 +144,7 @@ else:
 # --------- drawtext builders (FFmpeg 4.2 + 日本語対策) ---------
 def write_utf8_text(path: Path, text: str) -> None:
     # UTF-8 (BOMなし)で保存。FFmpeg 4.2 でも安定。
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text or "", encoding="utf-8", newline="\n")
 
 def build_drawtexts_via_textfiles(
     workdir: Path,
@@ -143,7 +155,8 @@ def build_drawtexts_via_textfiles(
     margin_top_px: int,
     margin_bottom_px: int,
     box_alpha: float,
-    font_path: Optional[Path]
+    font_path: Optional[Path],
+    font_name: Optional[str]  # ★ 追加：fontconfig 名
 ) -> str:
     """
     各行をUTF-8テキストファイルに書き出し、textfile= で読み込む。
@@ -151,8 +164,16 @@ def build_drawtexts_via_textfiles(
     - 行間 ≈ 1.25 * (h * fontsize)
     - 上部：上から順に
     - 下部：下から積み上げ
+    - フォントは fontfile（アップロード）→ font（fontconfig名）→ 無指定 の優先で選択
     """
-    font_opt = f":fontfile='{font_path.as_posix()}'" if font_path else ""
+    # ★ ここで fontfile / font の両対応
+    if font_path is not None and font_path.exists():
+        font_opt = f":fontfile='{font_path.as_posix()}'"
+    elif font_name and font_name.strip():
+        font_opt = f":font='{font_name.strip()}'"
+    else:
+        font_opt = ""
+
     filters = []
 
     # 上部
@@ -166,8 +187,9 @@ def build_drawtexts_via_textfiles(
             filt = (
                 f"drawtext=textfile='{tfile.as_posix()}'{font_opt}:"
                 f"x=(w-text_w)/2:y={y_expr}:"
-                f"fontsize=h*{fs_top_val}:"
-                f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
+                f"fontsize=h*{fs_top_val}:fontcolor=white:"
+                f"box=1:boxcolor=black@{box_alpha}:boxborderw=10:"
+                f"fix_bounds=1:text_shaping=1"
             )
             filters.append(filt)
 
@@ -183,8 +205,9 @@ def build_drawtexts_via_textfiles(
             filt = (
                 f"drawtext=textfile='{tfile.as_posix()}'{font_opt}:"
                 f"x=(w-text_w)/2:y={y_expr}:"
-                f"fontsize=h*{fs_bottom_val}:"
-                f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10"
+                f"fontsize=h*{fs_bottom_val}:fontcolor=white:"
+                f"box=1:boxcolor=black@{box_alpha}:boxborderw=10:"
+                f"fix_bounds=1:text_shaping=1"
             )
             filters.append(filt)
 
@@ -203,7 +226,7 @@ if preview:
         with st.spinner("プレビュー生成中..."):
             with tempfile.TemporaryDirectory(prefix="st_preview_concat_") as tmpd:
                 tmpdir = Path(tmpd)
-                # フォントの保存
+                # フォントの保存（アップロードされた場合）
                 font_path = None
                 if font_file is not None:
                     font_path = tmpdir / font_file.name
@@ -215,7 +238,7 @@ if preview:
                     in_path = tmpdir / f"in_prev_{idx:03d}{Path(c['name']).suffix}"
                     in_path.write_bytes(c["data"])
 
-                    # 行ごとtextfile方式でフィルタ作成
+                    # 行ごとtextfile方式でフィルタ作成（★ font_name を渡す）
                     line_dir = tmpdir / f"lines_{idx:03d}"
                     line_dir.mkdir(parents=True, exist_ok=True)
                     vf_core = build_drawtexts_via_textfiles(
@@ -227,7 +250,8 @@ if preview:
                         margin_top_px=int(margin_top),
                         margin_bottom_px=int(c["margin_bottom"]),
                         box_alpha=box_opacity,
-                        font_path=font_path
+                        font_path=font_path,
+                        font_name=system_font_name  # ★ 追加
                     )
 
                     # 縮小（任意）
@@ -274,7 +298,7 @@ if preview:
                     st.error(f"プレビューの連結に失敗しました。\n\n{log}")
                     st.stop()
 
-                # 3) 先頭N秒にトリム（できるだけ速く。まずは stream copy を試みる）
+                # 3) 先頭N秒にトリム
                 preview_out = tmpdir / "preview_head.mp4"
                 ok, log = run_ffmpeg([
                     get_ffmpeg_exe(), "-y",
@@ -284,7 +308,7 @@ if preview:
                     str(preview_out)
                 ])
                 if not ok:
-                    # キーフレーム都合で失敗時は超高速再エンコード
+                    # stream copy が合わない場合の超高速再エンコード
                     ok2, log2 = run_ffmpeg([
                         get_ffmpeg_exe(), "-y",
                         "-ss", "0", "-t", str(int(preview_seconds_total)),
@@ -337,7 +361,8 @@ if run:
                         margin_top_px=int(margin_top),
                         margin_bottom_px=int(c["margin_bottom"]),
                         box_alpha=box_opacity,
-                        font_path=font_path
+                        font_path=font_path,
+                        font_name=system_font_name  # ★ 追加
                     )
 
                     out_i = tmpdir / f"part_{idx:03d}.mp4"
