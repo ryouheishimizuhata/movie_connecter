@@ -13,8 +13,8 @@ def get_ffmpeg_exe() -> str:
 
 import imageio_ffmpeg
 
-st.set_page_config(page_title="動画結合＋二段字幕（Streamlit）", layout="wide")
-st.title("動画結合＋二段字幕（上：共通 / 下：クリップ別）")
+st.set_page_config(page_title="横動画結合アプリ", layout="wide")
+st.title("横動画結合アプリ")
 
 st.markdown("""
 **手順**
