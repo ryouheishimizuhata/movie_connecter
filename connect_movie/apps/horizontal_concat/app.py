@@ -16,13 +16,13 @@ def get_ffmpeg_exe() -> str:
 
 import imageio_ffmpeg
 
-st.set_page_config(page_title="動画結合＋二段字幕（Streamlit）", layout="wide")
+st.set_page_config(page_title="横動画連結アプリ", layout="wide")
 
-st.title("動画結合＋二段字幕（上：共通 / 下：クリップ別）")
+st.title("横動画連結アプリ")
 
 st.markdown("""
 **手順**
-1. 左のサイドバーで共通（上部）字幕や書き出し設定を入力  
+1. 左のサイドバーで上部字幕や書き出し設定を入力  
 2. 下で動画をまとめて選択（複数可）し、順序と各クリップ下部字幕を入力  
 3. 「結合して書き出す」を押す  
 """)
