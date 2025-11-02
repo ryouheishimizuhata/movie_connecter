@@ -34,8 +34,8 @@ def has_ffmpeg() -> bool:
         return False
 
 def ff_esc_basic(text: str) -> str:
-    # textfile= を使うため最低限（バックスラッシュのみ）
-    if text is None: return ""
+    if text is None:
+        return ""
     return text.replace("\\", r"\\")
 
 def run_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
@@ -49,6 +49,29 @@ def run_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
         return ok, "".join(logs)
     except Exception as e:
         return False, f"Exception: {e}"
+
+# ★ 同梱フォント探索関数を追加 ----------------
+def find_bundled_font() -> Optional[Path]:
+    """
+    リポジトリ同梱フォントを上位ディレクトリへ遡って探索。
+    見つかれば Path を返す。無ければ None。
+    """
+    try:
+        here = Path(__file__).resolve()
+        candidate_relpaths = [
+            Path("assets/fonts/LanobePOPv2/LightNovelPOPv2.otf"),
+            Path("assets/fonts/NotoSansCJKjp/NotoSansCJKjp-Regular.otf"),
+            Path("assets/fonts/NotoSansJP/NotoSansJP-Regular.ttf"),
+        ]
+        for up in [here, *list(here.parents)]:
+            base = up.parent if up.is_file() else up
+            for rel in candidate_relpaths:
+                cand = base / rel
+                if cand.exists():
+                    return cand
+    except Exception:
+        pass
+    return None
 
 # ---------------- Sidebar ----------------
 st.sidebar.header("共通設定（上部字幕 & 書き出し）")
@@ -65,7 +88,7 @@ crf = st.sidebar.number_input("CRF（画質：16-23推奨）", value=18, step=1,
 preset = st.sidebar.selectbox("preset", ["ultrafast","superfast","veryfast","faster","fast","medium","slow","slower","veryslow"], index=5)
 output_name = st.sidebar.text_input("出力ファイル名", value="output_joined.mp4")
 
-# 日本語フォント対策：アップロード or システムフォント名（fontconfig）
+# 日本語フォント設定
 font_file = st.sidebar.file_uploader(
     "（推奨）日本語フォントを指定（TTF/OTF）",
     type=["ttf", "otf"],
@@ -78,20 +101,18 @@ system_font_name = st.sidebar.text_input(
     help="例: 'Noto Sans CJK JP', 'Source Han Sans JP'（サーバにインストール必須）"
 )
 
-st.sidebar.info("⚠️ stlite（ブラウザのみ）では FFmpeg は動きません。ローカル/サーバ実行を想定。")
-
 st.sidebar.divider()
-st.sidebar.subheader("プレビュー設定（結合後の一本を表示）")
+st.sidebar.subheader("プレビュー設定")
 preview_seconds_total = st.sidebar.number_input("プレビュー秒数（結合後の先頭N秒）", value=12, min_value=3, max_value=120, step=1)
-preview_downscale = st.sidebar.checkbox("解像度縮小で高速化（縦480px）", value=True)
+preview_downscale = st.sidebar.checkbox("解像度縮小（縦480px）", value=True)
 preview_fast_encode = st.sidebar.checkbox("高速エンコード（CRF=28 / ultrafast）", value=True)
 
-# --------------- Inputs: videos ---------------
+# ---------------- File Upload ----------------
 st.subheader("動画と下部字幕の入力")
-uploads = st.file_uploader("動画ファイルを複数選択（順序は後で変更可）", type=["mp4","mov","mkv","avi","m4v","webm"], accept_multiple_files=True)
+uploads = st.file_uploader("動画ファイルを複数選択", type=["mp4","mov","mkv","avi","m4v","webm"], accept_multiple_files=True)
 
 if "clips" not in st.session_state:
-    st.session_state["clips"] = []  # List[dict]
+    st.session_state["clips"] = []
 
 def rebuild_from_uploads():
     existing = st.session_state["clips"]
@@ -115,10 +136,10 @@ def rebuild_from_uploads():
     st.session_state["clips"].extend(new_items)
 
 rebuild_from_uploads()
-
 clips = st.session_state["clips"]
+
 if clips:
-    st.caption("順序・各字幕を編集してからプレビュー／書き出しを行ってください。")
+    st.caption("順序・字幕編集後にプレビュー／書き出しを実行してください。")
     cols = st.columns([3,1,3,1,1])
     with cols[0]: st.markdown("**ファイル名**")
     with cols[1]: st.markdown("**順序**")
@@ -128,22 +149,16 @@ if clips:
 
     for i, c in enumerate(clips):
         cols = st.columns([3,1,3,1,1])
-        with cols[0]:
-            st.text(c["name"])
-        with cols[1]:
-            c["order"] = st.number_input(f"order_{i}", value=int(c["order"]), min_value=1, step=1, key=f"ord_{i}")
-        with cols[2]:
-            c["bottom"] = st.text_input(f"bottom_{i}", value=c["bottom"], key=f"bot_{i}")
-        with cols[3]:
-            c["fs_bottom"] = st.number_input(f"fsb_{i}", value=float(c["fs_bottom"]), min_value=0.01, max_value=0.5, step=0.01, key=f"fsbkey_{i}")
-        with cols[4]:
-            c["margin_bottom"] = st.number_input(f"mb_{i}", value=int(c["margin_bottom"]), min_value=0, step=2, key=f"mbkey_{i}")
+        with cols[0]: st.text(c["name"])
+        with cols[1]: c["order"] = st.number_input(f"order_{i}", value=int(c["order"]), min_value=1, step=1)
+        with cols[2]: c["bottom"] = st.text_input(f"bottom_{i}", value=c["bottom"])
+        with cols[3]: c["fs_bottom"] = st.number_input(f"fsb_{i}", value=float(c["fs_bottom"]), min_value=0.01, max_value=0.5, step=0.01)
+        with cols[4]: c["margin_bottom"] = st.number_input(f"mb_{i}", value=int(c["margin_bottom"]), min_value=0, step=2)
 else:
     st.info("動画を選択してください。")
 
-# --------- drawtext builders (FFmpeg 4.2 + 日本語対策) ---------
-def write_utf8_text(path: Path, text: str) -> None:
-    # UTF-8 (BOMなし)で保存。FFmpeg 4.2 でも安定。
+# ---------------- Drawtext Builder ----------------
+def write_utf8_text(path: Path, text: str):
     path.write_text(text or "", encoding="utf-8", newline="\n")
 
 def build_drawtexts_via_textfiles(
@@ -156,251 +171,43 @@ def build_drawtexts_via_textfiles(
     margin_bottom_px: int,
     box_alpha: float,
     font_path: Optional[Path],
-    font_name: Optional[str]  # ★ 追加：fontconfig 名
+    font_name: Optional[str]
 ) -> str:
-    """
-    各行をUTF-8テキストファイルに書き出し、textfile= で読み込む。
-    - x=(w-text_w)/2 で横中央
-    - 行間 ≈ 1.25 * (h * fontsize)
-    - 上部：上から順に
-    - 下部：下から積み上げ
-    - フォントは fontfile（アップロード）→ font（fontconfig名）→ 無指定 の優先で選択
-    """
-    # ★ ここで fontfile / font の両対応
-    if font_path is not None and font_path.exists():
+    # フォント解決：アップロード → システム名 → 同梱フォント
+    if font_path and font_path.exists():
         font_opt = f":fontfile='{font_path.as_posix()}'"
     elif font_name and font_name.strip():
         font_opt = f":font='{font_name.strip()}'"
     else:
-        font_opt = ""
+        bundled = find_bundled_font()
+        if bundled:
+            font_opt = f":fontfile='{bundled.as_posix()}'"
+        else:
+            font_opt = ""
 
     filters = []
-
-    # 上部
     if top_text:
-        lines = top_text.split("\n")
-        for i, line in enumerate(lines):
-            esc_line = ff_esc_basic(line)
+        for i, line in enumerate(top_text.split("\n")):
             tfile = workdir / f"top_{i}.txt"
-            write_utf8_text(tfile, esc_line)
-            y_expr = f"{int(margin_top_px)}+{i}*(h*{fs_top_val}*1.25)"
-            filt = (
+            write_utf8_text(tfile, ff_esc_basic(line))
+            y = f"{margin_top_px}+{i}*(h*{fs_top_val}*1.25)"
+            filters.append(
                 f"drawtext=textfile='{tfile.as_posix()}'{font_opt}:"
-                f"x=(w-text_w)/2:y={y_expr}:"
-                f"fontsize=h*{fs_top_val}:fontcolor=white:"
-                f"box=1:boxcolor=black@{box_alpha}:boxborderw=10:"
+                f"x=(w-text_w)/2:y={y}:fontsize=h*{fs_top_val}:"
+                f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10:"
                 f"fix_bounds=1:text_shaping=1"
             )
-            filters.append(filt)
-
-    # 下部
     if bottom_text:
         lines = bottom_text.split("\n")
         N = len(lines)
         for i, line in enumerate(lines):
-            esc_line = ff_esc_basic(line)
             tfile = workdir / f"bottom_{i}.txt"
-            write_utf8_text(tfile, esc_line)
-            y_expr = f"h-( {N}-{i} )*(h*{fs_bottom_val}*1.25)-{int(margin_bottom_px)}"
-            filt = (
+            write_utf8_text(tfile, ff_esc_basic(line))
+            y = f"h-( {N}-{i} )*(h*{fs_bottom_val}*1.25)-{margin_bottom_px}"
+            filters.append(
                 f"drawtext=textfile='{tfile.as_posix()}'{font_opt}:"
-                f"x=(w-text_w)/2:y={y_expr}:"
-                f"fontsize=h*{fs_bottom_val}:fontcolor=white:"
-                f"box=1:boxcolor=black@{box_alpha}:boxborderw=10:"
+                f"x=(w-text_w)/2:y={y}:fontsize=h*{fs_bottom_val}:"
+                f"fontcolor=white:box=1:boxcolor=black@{box_alpha}:boxborderw=10:"
                 f"fix_bounds=1:text_shaping=1"
             )
-            filters.append(filt)
-
     return ",".join(filters) if filters else "null"
-
-# ---------------- Preview (concat → trim) ----------------
-preview = st.button("🔎 結合プレビュー（先頭N秒）", use_container_width=True)
-
-if preview:
-    if not has_ffmpeg():
-        st.error("FFmpeg が見つかりません。PATH を確認してください。")
-    elif not clips:
-        st.warning("動画が選択されていません。")
-    else:
-        clips_sorted = sorted(clips, key=lambda x: x["order"])
-        with st.spinner("プレビュー生成中..."):
-            with tempfile.TemporaryDirectory(prefix="st_preview_concat_") as tmpd:
-                tmpdir = Path(tmpd)
-                # フォントの保存（アップロードされた場合）
-                font_path = None
-                if font_file is not None:
-                    font_path = tmpdir / font_file.name
-                    font_path.write_bytes(font_file.getvalue())
-
-                parts = []
-                # 1) 各クリップに字幕焼き込み（低解像度&高速設定）
-                for idx, c in enumerate(clips_sorted):
-                    in_path = tmpdir / f"in_prev_{idx:03d}{Path(c['name']).suffix}"
-                    in_path.write_bytes(c["data"])
-
-                    # 行ごとtextfile方式でフィルタ作成（★ font_name を渡す）
-                    line_dir = tmpdir / f"lines_{idx:03d}"
-                    line_dir.mkdir(parents=True, exist_ok=True)
-                    vf_core = build_drawtexts_via_textfiles(
-                        workdir=line_dir,
-                        top_text=global_top_text,
-                        fs_top_val=fs_top,
-                        bottom_text=(c["bottom"] or ""),
-                        fs_bottom_val=float(c["fs_bottom"]),
-                        margin_top_px=int(margin_top),
-                        margin_bottom_px=int(c["margin_bottom"]),
-                        box_alpha=box_opacity,
-                        font_path=font_path,
-                        font_name=system_font_name  # ★ 追加
-                    )
-
-                    # 縮小（任意）
-                    scale_filter = "scale=-2:480" if preview_downscale else None
-                    vf_full = vf_core if vf_core != "null" else (scale_filter or "null")
-                    if vf_core != "null" and scale_filter:
-                        vf_full = vf_core + "," + scale_filter
-
-                    pv_crf = 28 if preview_fast_encode else max(20, min(30, crf))
-                    pv_preset = "ultrafast" if preview_fast_encode else preset
-
-                    out_i = tmpdir / f"part_prev_{idx:03d}.mp4"
-                    cmd = [
-                        get_ffmpeg_exe(), "-y",
-                        "-i", str(in_path),
-                        "-vf", vf_full,
-                        "-c:v", "libx264", "-crf", str(pv_crf), "-preset", pv_preset,
-                        "-c:a", "aac",
-                        "-movflags", "+faststart",
-                        str(out_i)
-                    ]
-                    ok, log = run_ffmpeg(cmd)
-                    if not ok:
-                        st.error(f"プレビュー用エンコードに失敗しました（{c['name']}）。\n\n{log}")
-                        st.stop()
-                    parts.append(out_i)
-
-                # 2) 連結（concat demuxer）
-                listfile = tmpdir / "concat_prev.txt"
-                with listfile.open("w", encoding="utf-8") as f:
-                    for p in parts:
-                        sp = str(p).replace("'", "'\\''")
-                        f.write(f"file '{sp}'\n")
-
-                concat_all = tmpdir / "preview_all.mp4"
-                ok, log = run_ffmpeg([
-                    get_ffmpeg_exe(), "-y",
-                    "-f", "concat", "-safe", "0",
-                    "-i", str(listfile),
-                    "-c", "copy",
-                    str(concat_all)
-                ])
-                if not ok:
-                    st.error(f"プレビューの連結に失敗しました。\n\n{log}")
-                    st.stop()
-
-                # 3) 先頭N秒にトリム
-                preview_out = tmpdir / "preview_head.mp4"
-                ok, log = run_ffmpeg([
-                    get_ffmpeg_exe(), "-y",
-                    "-ss", "0", "-t", str(int(preview_seconds_total)),
-                    "-i", str(concat_all),
-                    "-c", "copy",
-                    str(preview_out)
-                ])
-                if not ok:
-                    # stream copy が合わない場合の超高速再エンコード
-                    ok2, log2 = run_ffmpeg([
-                        get_ffmpeg_exe(), "-y",
-                        "-ss", "0", "-t", str(int(preview_seconds_total)),
-                        "-i", str(concat_all),
-                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
-                        "-c:a", "aac",
-                        "-movflags", "+faststart",
-                        str(preview_out)
-                    ])
-                    if not ok2:
-                        st.error(f"プレビューのトリムに失敗しました。\n\n{log}\n{log2}")
-                        st.stop()
-
-                st.success(f"結合後の先頭 {preview_seconds_total} 秒プレビュー")
-                st.video(str(preview_out))
-
-# ---------------- Final export (full quality) ----------------
-run = st.button("🎬 結合して書き出す", use_container_width=True)
-
-if run:
-    if not has_ffmpeg():
-        st.error("FFmpeg が見つかりません。PATH を確認してください。")
-    elif not clips:
-        st.warning("動画が選択されていません。")
-    else:
-        clips_sorted = sorted(clips, key=lambda x: x["order"])
-        with st.spinner("書き出し中...（時間がかかる場合があります）"):
-            with tempfile.TemporaryDirectory(prefix="st_join_export_") as tmpd:
-                tmpdir = Path(tmpd)
-
-                font_path = None
-                if font_file is not None:
-                    font_path = tmpdir / font_file.name
-                    font_path.write_bytes(font_file.getvalue())
-
-                parts = []
-                # 各クリップを本番設定で焼き込み
-                for idx, c in enumerate(clips_sorted):
-                    in_path = tmpdir / f"in_{idx:03d}{Path(c['name']).suffix}"
-                    in_path.write_bytes(c["data"])
-
-                    line_dir = tmpdir / f"lines_export_{idx:03d}"
-                    line_dir.mkdir(parents=True, exist_ok=True)
-                    vf = build_drawtexts_via_textfiles(
-                        workdir=line_dir,
-                        top_text=global_top_text,
-                        fs_top_val=fs_top,
-                        bottom_text=(c["bottom"] or ""),
-                        fs_bottom_val=float(c["fs_bottom"]),
-                        margin_top_px=int(margin_top),
-                        margin_bottom_px=int(c["margin_bottom"]),
-                        box_alpha=box_opacity,
-                        font_path=font_path,
-                        font_name=system_font_name  # ★ 追加
-                    )
-
-                    out_i = tmpdir / f"part_{idx:03d}.mp4"
-                    cmd = [
-                        get_ffmpeg_exe(), "-y",
-                        "-i", str(in_path),
-                        "-vf", vf,
-                        "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
-                        "-c:a", "aac",
-                        "-movflags", "+faststart",
-                        str(out_i)
-                    ]
-                    ok, log = run_ffmpeg(cmd)
-                    if not ok:
-                        st.error(f"クリップ {idx+1} の処理に失敗しました。\n\n{log}")
-                        st.stop()
-                    parts.append(out_i)
-
-                listfile = tmpdir / "concat.txt"
-                with listfile.open("w", encoding="utf-8") as f:
-                    for p in parts:
-                        sp = str(p).replace("'", "'\\''")
-                        f.write(f"file '{sp}'\n")
-
-                out_path = tmpdir / (output_name or "output_joined.mp4")
-                ok, log = run_ffmpeg([
-                    get_ffmpeg_exe(), "-y",
-                    "-f", "concat", "-safe", "0",
-                    "-i", str(listfile),
-                    "-c", "copy",
-                    str(out_path)
-                ])
-                if not ok:
-                    st.error(f"結合に失敗しました。\n\n{log}")
-                    st.stop()
-
-                data = out_path.read_bytes()
-                st.success("完了しました。下のボタンからダウンロードできます。")
-                st.download_button("📥 ダウンロード", data=data,
-                                   file_name=Path(output_name).name or "output_joined.mp4",
-                                   mime="video/mp4")
