@@ -60,8 +60,8 @@ def run_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
 # --------------- Sidebar Settings ---------------
 st.sidebar.header("共通設定（上部字幕 & 書き出し）")
 global_top_text = st.sidebar.text_area("上部字幕（全クリップ共通）", value="", height=80, help="空欄で上部字幕なし。改行可。")
-fs_top = st.sidebar.number_input("上部字幕フォントサイズ（映像高さ×）", value=0.04, step=0.001, min_value=0.01, max_value=0.5)
-fs_bottom_default = st.sidebar.number_input("下部字幕フォントサイズ（既定・映像高さ×）", value=0.06, step=0.001, min_value=0.01, max_value=0.5)
+fs_top = st.sidebar.number_input("上部字幕フォントサイズ（映像高さ×）", value=0.04, step=0.001, min_value=0.01, max_value=0.5,key="fs_top_001",format="%.3f")
+fs_bottom_default = st.sidebar.number_input("下部字幕フォントサイズ（既定・映像高さ×）", value=0.06, step=0.001, min_value=0.01, max_value=0.5,key="fs_bottom_001",format="%.3f")
 margin_top = st.sidebar.number_input("上部の余白(px)", value=300, step=2, min_value=0)
 margin_bottom_default = st.sidebar.number_input("下部の余白（既定・px）", value=500, step=2, min_value=0)
 box_opacity = st.sidebar.slider("字幕背景の不透明度", 0.0, 1.0, 0.55, 0.05)
